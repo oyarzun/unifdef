@@ -111,6 +111,7 @@ typedef enum {
 	NO_COMMENT = false,	/* outside a comment */
 	C_COMMENT,		/* in a comment like this one */
 	CXX_COMMENT,		/* between // and end of line */
+	FORTRAN_COMMENT,		/* between ! and end of line */
 	STARTING_COMMENT,	/* just after slash-backslash-newline */
 	FINISHING_COMMENT,	/* star-backslash-newline in a C comment */
 	CHAR_LITERAL,		/* inside '' */
@@ -119,7 +120,7 @@ typedef enum {
 } Comment_state;
 
 static char const * const comment_name[] = {
-	"NO", "C", "CXX", "STARTING", "FINISHING", "CHAR", "STRING"
+	"NO", "C", "CXX", "FORTRAN", "STARTING", "FINISHING", "CHAR", "STRING"
 };
 
 /* state of preprocessor line parser */
@@ -162,6 +163,7 @@ static bool             lnnum;			/* -n: add #line directives */
 static bool             symlist;		/* -s: output symbol list */
 static bool             symdepth;		/* -S: output symbol depth */
 static bool             text;			/* -t: this is a text file */
+static bool             fortran;			/* -F: this is a fortran file */
 
 static const char      *symname[MAXSYMS];	/* symbol name */
 static const char      *value[MAXSYMS];		/* -Dsym=value */
@@ -256,7 +258,7 @@ main(int argc, char *argv[])
 {
 	int opt;
 
-	while ((opt = getopt(argc, argv, "i:D:U:f:I:M:o:x:bBcdehKklmnsStV")) != -1)
+	while ((opt = getopt(argc, argv, "i:D:U:f:I:M:o:x:bBcdehKklmnsStVF")) != -1)
 		switch (opt) {
 		case 'i': /* treat stuff controlled by these symbols as text */
 			/*
@@ -295,6 +297,9 @@ main(int argc, char *argv[])
 			break;
 		case 'e': /* fewer errors from dodgy lines */
 			iocccok = true;
+			break;
+		case 'F': /* fortran source mode */
+			fortran = true;
 			break;
 		case 'f': /* definitions file */
 			defundefile(optarg);
@@ -503,6 +508,7 @@ help(void)
 	    "	-t	ignore C strings and comments\n"
 	    "	-V	print version\n"
 	    "	-x{012}	exit status mode\n"
+	    "	-F	fortran source mode\n"
 	);
 	exit(0);
 }
@@ -1247,18 +1253,21 @@ skipcomment(const char *cp)
 			cp += 2;
 		else switch (incomment) {
 		case NO_COMMENT:
-			if (strncmp(cp, "/\\\r\n", 4) == 0) {
+			if (!fortran && strncmp(cp, "/\\\r\n", 4) == 0) {
 				incomment = STARTING_COMMENT;
 				cp += 4;
-			} else if (strncmp(cp, "/\\\n", 3) == 0) {
+			} else if (!fortran &&  strncmp(cp, "/\\\n", 3) == 0) {
 				incomment = STARTING_COMMENT;
 				cp += 3;
-			} else if (strncmp(cp, "/*", 2) == 0) {
+			} else if (!fortran && strncmp(cp, "/*", 2) == 0) {
 				incomment = C_COMMENT;
 				cp += 2;
-			} else if (strncmp(cp, "//", 2) == 0) {
+			} else if (!fortran && strncmp(cp, "//", 2) == 0) {
 				incomment = CXX_COMMENT;
 				cp += 2;
+			} else if (fortran && strncmp(cp, "!", 1) == 0) {
+				incomment = FORTRAN_COMMENT;
+				cp += 1;
 			} else if (strncmp(cp, "\'", 1) == 0) {
 				incomment = CHAR_LITERAL;
 				linestate = LS_DIRTY;
@@ -1267,7 +1276,7 @@ skipcomment(const char *cp)
 				incomment = STRING_LITERAL;
 				linestate = LS_DIRTY;
 				cp += 1;
-			} else if (strncmp(cp, "R\"(", 3) == 0) {
+			} else if (!fortran && strncmp(cp, "R\"(", 3) == 0) {
 				incomment = RAW_STRING_LITERAL;
 				linestate = LS_DIRTY;
 				cp += 3;
@@ -1280,6 +1289,7 @@ skipcomment(const char *cp)
 				return (cp);
 			continue;
 		case CXX_COMMENT:
+		case FORTRAN_COMMENT:
 			if (strncmp(cp, "\n", 1) == 0) {
 				incomment = NO_COMMENT;
 				linestate = LS_START;
@@ -1292,7 +1302,7 @@ skipcomment(const char *cp)
 			    (incomment == STRING_LITERAL && cp[0] == '\"')) {
 				incomment = NO_COMMENT;
 				cp += 1;
-			} else if (cp[0] == '\\') {
+			} else if (!fortran && cp[0] == '\\') {
 				if (cp[1] == '\0')
 					cp += 1;
 				else
